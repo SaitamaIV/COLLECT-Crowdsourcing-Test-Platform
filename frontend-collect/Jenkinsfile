@@ -1,0 +1,74 @@
+
+pipeline {
+    agent {label 'slave1'}
+    environment {
+        branch="${env.gitlabSourceBranch}"
+
+    }
+    options {
+        timestamps()    //设置在项目打印日志时带上对应时间
+        disableConcurrentBuilds()   //不允许同时执行流水线，被用来防止同时访问共享资源等
+//         timeout(time: 10, unit: 'MINUTES')   // 设置流水线运行超过n分钟，Jenkins将中止流水线
+//         buildDiscarder(logRotator(numToKeepStr: '20'))   // 表示保留n次构建历史
+    }
+    stages{
+        stage('Print Message') {      //打印信息!
+            steps {
+                echo '打印信息'
+                echo "workspace: ${WORKSPACE}"
+                sh "cd .. && ls -al"
+                echo "${branch}"
+           }
+           post {
+                failure {
+                    updateGitlabCommitStatus name: 'Print Message', state: 'failed'
+                }
+           }
+        }
+        stage('Npm Build') {
+            agent {
+                docker {
+                    image 'node:14-alpine'
+                    args '-p 3000:3000'
+                    reuseNode true
+                }
+            }
+            steps {
+                echo "workspace: ${WORKSPACE}"
+                sh "ls -l"
+                sh "rm -f -r dist"
+                sh "ls -l"
+                sh "npm -v"
+                sh "npm config set unsafe-perm true"
+                sh "npm i node-sass --sass_binary_site=https://npm.taobao.org/mirrors/node-sass/"
+                sh "npm install"
+                sh "npm install node-sass@4.14.1"
+                sh "npm rebuild"
+                sh "npm install"
+                sh "chmod 777 node_modules/.bin/vue-cli-service"
+                sh "npm run build"
+                sh "cd dist && ls -al"
+           }
+           post {
+                failure {
+                   updateGitlabCommitStatus name: 'Npm Build', state: 'failed'
+                }
+           }
+        }
+        stage('Copy Into Nginx') {
+            steps {
+                sh "cd dist && ls -al"
+                sh "bash front.sh"
+            }
+            post {
+                failure {
+                    updateGitlabCommitStatus name: 'Copy Into Nginx', state: 'failed'
+                }
+
+                success {
+                    updateGitlabCommitStatus name:'build', state: 'success'
+                }
+            }
+        }
+    }
+}
